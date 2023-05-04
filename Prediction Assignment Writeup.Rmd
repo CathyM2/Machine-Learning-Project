@@ -1,0 +1,123 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Cathy M"
+date: "2023-05-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+### Loading required packages
+
+```{r paackages}
+library(caret)
+```
+
+### Loading the data and creating test + train data sets 
+
+Loading the data from csv and splitting the training data into two, this allows the model to be tested on data with the correct 'classe' variable to test accuracy.
+
+```{r loading data}
+
+FinalTest<- read.csv('pml-testing.csv')
+Data<- read.csv('pml-training.csv')
+
+FinalTest<- FinalTest[,-1]
+Data <- Data[,-1]
+
+inTrain = createDataPartition(Data$classe, p = 3/4)[[1]]
+
+training = Data[ inTrain,]
+
+testing = Data[-inTrain,]
+```
+
+### Looking into the data structure
+
+Checking the structure of the data and the number of options for the 'classe' variable 
+
+```{r data exploration}
+str(training)
+unique(training$classe)
+```
+Given the number of variables, we will want to remove some of those that are less useful, this has been done in two ways. Firstly removing those who have more than 50% of occurances being NA, then by removing those with more than 50% of occurances being blank
+
+``` {r Cutting down Variables}
+# Identifying variables with NAs
+NaCol<- sapply(training, function(x) sum(is.na(x)))
+NaCol<- NaCol*100/nrow(training)
+NaCol<- subset(NaCol,NaCol<0.5)
+
+#Removing those varibales from the training set
+training <- training[,names(NaCol)]
+
+# Identifying variables with Blanks
+BlankCol<- sapply(training, function(x) sum(x==''))
+BlankCol<- BlankCol*100/nrow(training)
+BlankCol<- subset(BlankCol,BlankCol<0.5)
+
+#Removing those varibales from the training set
+training <- training[,names(BlankCol)]
+```
+
+
+### Using PCA to find which variables explain most of the variation
+
+I have turned all variables (except the explanatory classe variable) into numeric then taken the absolute of each as log() cannot be performed on negative values. Then I applied (log(x+1)) here to scale the variables. Limited the PCA to 0.7 to reduce the number of PCs used.
+
+``` {r Performing PCA}
+# removing the username, 'new_window' and cvtd_timestamp columns
+training<- training[,-c(1:5)]
+
+training[,-54]<- as.data.frame(apply(training[,-54], 2, as.numeric))
+
+training[,-54]<- as.data.frame(apply(training[,-54], 2, abs))
+
+pp <- preProcess(log10(training[,-54]+1), method = 'pca',thresh = .7)
+
+```
+
+### Applying the PCA from the previous step and creating a model + In sample test
+This will find the in sample error (accuracy when predicting from the same data the model was built off).
+In sample error: accuracy = 1
+```{r Applying PCA + Creating Model}
+trainpp<- predict(pp,log10(training[,-54]+1) )
+trainpp$classe<- as.factor(training$classe)
+model1<- train(classe~., method='rf',data = trainpp)
+trainpp$Predicted<- predict(model1, trainpp[-c(12)])
+confusionMatrix(as.factor(trainpp$Predicted), trainpp$classe)
+```
+
+
+### Applying the model to the test set split off earlier 
+This is to get an idea of the out of sample accuracy as these are data points not used to create the model.
+Out of sample error: accuracy = 0.9029
+``` {r Model Test}
+
+testing <- testing[,names(NaCol)]
+testing <- testing[,names(BlankCol)]
+testing<- testing[,-c(1:5)]
+testing[,-54]<- as.data.frame(apply(testing[,-54], 2, as.numeric))
+
+testing[,-54]<- as.data.frame(apply(testing[,-54], 2, abs))
+testpp<- predict(pp,log10(testing[,-54]+1) )
+testpp$Result <- as.factor(testing$classe)
+
+testpp$prediction<- predict(model1, testpp[-c(12)])
+confusionMatrix(testpp$prediction, testpp$Result)
+```
+### Applying the model to the final test set (without the Classe variable)
+
+```{r Apply To Final Set}
+
+FinalTest <- FinalTest[,names(NaCol[-92])]
+FinalTest <- FinalTest[,names(BlankCol[-59])]
+FinalTest<- FinalTest[,-c(1:5)]
+FinalTest<- as.data.frame(apply(FinalTest, 2, as.numeric))
+
+FinalTest<- as.data.frame(apply(FinalTest, 2, abs))
+FinalTestpp<- predict(pp,log10(FinalTest+1) )
+
+FinalTestpp$prediction<- predict(model1, FinalTestpp)
+```
